@@ -245,15 +245,20 @@ class KanbanTaskItem(QFrame):
 
     def _build_ui(self):
         accent = self.task.get("color") or COLORS['primary']
+        is_completed = self.task.get("status") == "completed" or self.task.get("auto_completed")
+        bg_color = COLORS['bg'] if is_completed else COLORS['surface']
+        border_col = accent if accent else COLORS['border']
+        text_muted_style = "color: #9CA3AF;" if is_completed else ""
         self.setStyleSheet(f"""
             QFrame {{
-                background: {COLORS['surface']};
+                background: {bg_color};
                 border: 1px solid {COLORS['border']};
-                border-left: 4px solid {accent};
+                border-left: 4px solid {border_col};
                 border-radius: 8px;
             }}
             QLabel {{
                 background: transparent;
+                {text_muted_style}
             }}
         """)
         layout = QVBoxLayout(self)
@@ -284,6 +289,7 @@ class KanbanTaskItem(QFrame):
                 background: #059669;
             }}
         """)
+        # Always allow clicking the done button so users can interact even if auto-completed
         done_btn.clicked.connect(lambda: self.complete_requested.emit(self.task_id))
         row.addWidget(done_btn)
 
@@ -491,6 +497,8 @@ class KanbanView(QWidget):
         super().__init__(parent)
         self.min_column_width = 260
         self.show_quick = False
+        self.show_auto_complete = False
+        self.show_recent_completed = False
         self._category_order_ids: list[int] = []
         self._columns: list[KanbanColumn] = []
         self._build_ui()
@@ -515,6 +523,9 @@ class KanbanView(QWidget):
         self.show_quick_check.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.show_quick_check.stateChanged.connect(self._on_show_quick_changed)
         top.addWidget(self.show_quick_check)
+
+        # Auto-complete column toggle (controlled by settings)
+        # (no visible text shown in the header)
 
         self.add_col_btn = QPushButton(t("kanban_add_category"))
         self.add_col_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -564,12 +575,21 @@ class KanbanView(QWidget):
         self.title.setText(t("nav_kanban"))
         self.add_col_btn.setText(t("kanban_add_category"))
         self.show_quick_check.setText(t("kanban_show_quick"))
+        # auto-complete label handled via set_show_auto_complete
 
     def set_show_quick(self, enabled: bool):
         self.show_quick = bool(enabled)
         self.show_quick_check.blockSignals(True)
         self.show_quick_check.setChecked(self.show_quick)
         self.show_quick_check.blockSignals(False)
+
+    def set_show_auto_complete(self, enabled: bool):
+        self.show_auto_complete = bool(enabled)
+        # no header text shown
+        return
+
+    def set_show_recent_completed(self, enabled: bool):
+        self.show_recent_completed = bool(enabled)
 
     def _on_show_quick_changed(self, state):
         self.show_quick = bool(state)
@@ -579,7 +599,7 @@ class KanbanView(QWidget):
         self.min_column_width = max(180, int(min_column_width))
         self._apply_column_sizing()
 
-    def refresh(self, tasks: list[dict], categories: list[dict]):
+    def refresh(self, tasks: list[dict], categories: list[dict], recent_completed: list[dict] = None):
         while self.board_layout.count() > 1:
             item = self.board_layout.takeAt(0)
             if item.widget():
@@ -591,9 +611,13 @@ class KanbanView(QWidget):
 
         quick_tasks: list[dict] = []
         normal_tasks: list[dict] = []
+        auto_tasks: list[dict] = []
+        recent_tasks: list[dict] = recent_completed or []
         for task in tasks:
             if self.show_quick and (task.get("task_type") == "quick"):
                 quick_tasks.append(task)
+            elif task.get("category_id") == "__auto_complete__" or task.get("auto_completed"):
+                auto_tasks.append(task)
             else:
                 normal_tasks.append(task)
 
@@ -633,6 +657,37 @@ class KanbanView(QWidget):
                 True,
                 True,
                 grouped.get(cat["id"], []),
+            )
+
+        # Append Auto-complete column at the end when enabled
+        if self.show_auto_complete:
+            self._add_column(
+                "__auto_complete__",
+                t("kanban_auto_complete_column"),
+                "",
+                False,
+                False,
+                False,
+                auto_tasks,
+                bg_color="#F3F4F6",
+                allow_drop=True,
+                allow_drag=True,
+            )
+
+        # Append Recent Completed column at the end when enabled
+        if self.show_recent_completed and recent_tasks:
+            # recent completed styled muted
+            self._add_column(
+                "__recent_completed__",
+                t("recent_completed_column"),
+                "",
+                False,
+                False,
+                False,
+                recent_tasks,
+                bg_color="#F8FAFC",
+                allow_drop=False,
+                allow_drag=False,
             )
 
         self._apply_column_sizing()

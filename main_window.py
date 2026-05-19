@@ -37,6 +37,7 @@ from notes_view import NotesView
 from quick_view import QuickView
 from i18n import t, set_language, get_language
 from kanban_view import KanbanView, CategoryDialog
+from date_utils import is_overdue
 
 
 def _get_data_dir() -> str:
@@ -71,7 +72,7 @@ class MainWindow(QMainWindow):
         # Load preferences
         prefs = load_prefs()
         lang = prefs.get("language", "zh_tw")
-        theme = prefs.get("theme", "dark")
+        theme = prefs.get("theme", "light")
         accent = prefs.get("accent", "purple")
         self._opacity = prefs.get("opacity", 1.0)
         self._on_top = prefs.get("on_top", False)
@@ -85,6 +86,11 @@ class MainWindow(QMainWindow):
         self._mini_clock_theme = prefs.get("mini_clock_theme", "classic")
         self._kanban_min_col_width = prefs.get("kanban_min_col_width", 260)
         self._kanban_show_quick = prefs.get("kanban_show_quick", False)
+        self._kanban_auto_complete_enabled = prefs.get("kanban_auto_complete_enabled", False)
+        self._kanban_auto_complete_color = prefs.get("kanban_auto_complete_color", "#D1D5DB")
+        self._kanban_auto_complete_retention = int(prefs.get("kanban_auto_complete_retention_days", 3))
+        self._kanban_recent_completed_enabled = prefs.get("kanban_recent_completed_enabled", False)
+        self._kanban_recent_completed_days = int(prefs.get("kanban_recent_completed_days", 3))
 
         set_language(lang)
         set_theme(theme)
@@ -292,6 +298,8 @@ class MainWindow(QMainWindow):
         self.kanban_view.show_quick_toggled.connect(self._on_kanban_show_quick_toggled)
         self.kanban_view.set_layout_preferences(self._kanban_min_col_width)
         self.kanban_view.set_show_quick(self._kanban_show_quick)
+        self.kanban_view.set_show_auto_complete(self._kanban_auto_complete_enabled)
+        self.kanban_view.set_show_recent_completed(self._kanban_recent_completed_enabled)
         self.stack.addWidget(self.kanban_view)
 
         # View 3: History
@@ -316,6 +324,11 @@ class MainWindow(QMainWindow):
         self.settings_panel.mini_views_changed.connect(self._on_mini_views_changed)
         self.settings_panel.mini_gadgets_changed.connect(self._on_mini_gadgets_changed)
         self.settings_panel.mini_clock_theme_changed.connect(self._on_mini_clock_theme_changed)
+        self.settings_panel.kanban_auto_complete_changed.connect(self._on_kanban_auto_complete_changed)
+        self.settings_panel.kanban_auto_complete_color_changed.connect(self._on_kanban_auto_complete_color_changed)
+        self.settings_panel.kanban_auto_complete_days_changed.connect(self._on_kanban_auto_complete_days_changed)
+        self.settings_panel.kanban_recent_completed_changed.connect(self._on_kanban_recent_completed_changed)
+        self.settings_panel.kanban_recent_completed_days_changed.connect(self._on_kanban_recent_completed_days_changed)
 
         # Sync settings panel to current state
         self.settings_panel.opacity_slider.setValue(int(self._opacity * 100))
@@ -323,6 +336,11 @@ class MainWindow(QMainWindow):
         self.settings_panel.mini_width_spin.setValue(self._mini_w)
         self.settings_panel.mini_height_spin.setValue(self._mini_h)
         self.settings_panel.set_kanban_layout(self._kanban_min_col_width)
+        self.settings_panel.set_kanban_auto_complete(
+            self._kanban_auto_complete_enabled,
+            self._kanban_auto_complete_color,
+            self._kanban_auto_complete_retention,
+        )
         self.settings_panel.set_mini_visible_views(self._mini_visible_views)
         self.settings_panel.set_mini_gadgets(
             self._mini_show_gadgets,
@@ -573,9 +591,48 @@ class MainWindow(QMainWindow):
         self.quick_view.refresh(quick_tasks)
 
     def refresh_kanban(self):
+        # Cleanup old auto-completed records first
+        from database import cleanup_auto_completed, get_completed_tasks, auto_complete_task
+
+        cleanup_auto_completed(self._kanban_auto_complete_retention)
+
+        # Fetch active tasks and auto-complete any overdue ones that are in the auto-complete column
         tasks = get_active_tasks(include_quick=self._kanban_show_quick)
+        to_auto = []
+        for t in tasks:
+            if t.get("category_id") == "__auto_complete__":
+                if is_overdue(t.get("due_date")):
+                    to_auto.append(int(t["id"]))
+
+        for tid in to_auto:
+            auto_complete_task(tid)
+
+        # Re-fetch active tasks after auto-completing
+        tasks = get_active_tasks(include_quick=self._kanban_show_quick)
+
+        # Do not re-insert completed tasks into the active Kanban view.
+        # Completed tasks (auto or manual) should be removed from Kanban and task lists immediately.
         categories = get_board_categories()
-        self.kanban_view.refresh(tasks, categories)
+        # If Recent Completed is enabled, include recently completed tasks as a separate column
+        recent_completed = []
+        if self._kanban_recent_completed_enabled:
+            completed = get_completed_tasks()
+            from datetime import datetime, timedelta
+            cutoff = datetime.now() - timedelta(days=int(self._kanban_recent_completed_days))
+            for c in completed:
+                ac = c.get("completed_at")
+                if not ac:
+                    continue
+                try:
+                    ac_dt = datetime.strptime(ac, "%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    continue
+                if ac_dt >= cutoff:
+                    # mark so kanban view can style it appropriately
+                    c["recent_completed"] = True
+                    recent_completed.append(c)
+
+        self.kanban_view.refresh(tasks, categories, recent_completed=recent_completed)
 
     def _on_kanban_show_quick_toggled(self, enabled: bool):
         self._kanban_show_quick = bool(enabled)
@@ -655,6 +712,39 @@ class MainWindow(QMainWindow):
         self._kanban_min_col_width = int(min_col_width)
         self.kanban_view.set_layout_preferences(self._kanban_min_col_width)
         self._save_current_prefs()
+
+    def _on_kanban_auto_complete_changed(self, enabled: bool):
+        self._kanban_auto_complete_enabled = bool(enabled)
+        self.kanban_view.set_show_auto_complete(self._kanban_auto_complete_enabled)
+        self._save_current_prefs()
+        self.refresh_kanban()
+
+    def _on_kanban_auto_complete_color_changed(self, color: str):
+        self._kanban_auto_complete_color = color or "#D1D5DB"
+        self._save_current_prefs()
+        self.refresh_kanban()
+
+    def _on_kanban_auto_complete_days_changed(self, days: int):
+        try:
+            self._kanban_auto_complete_retention = int(days)
+        except Exception:
+            self._kanban_auto_complete_retention = 3
+        self._save_current_prefs()
+        self.refresh_kanban()
+
+    def _on_kanban_recent_completed_changed(self, enabled: bool):
+        self._kanban_recent_completed_enabled = bool(enabled)
+        self.kanban_view.set_show_recent_completed(self._kanban_recent_completed_enabled)
+        self._save_current_prefs()
+        self.refresh_kanban()
+
+    def _on_kanban_recent_completed_days_changed(self, days: int):
+        try:
+            self._kanban_recent_completed_days = int(days)
+        except Exception:
+            self._kanban_recent_completed_days = 3
+        self._save_current_prefs()
+        self.refresh_kanban()
 
     def _on_history_deleted(self):
         """Refresh calendar after a completed task is deleted from history."""
@@ -807,4 +897,9 @@ class MainWindow(QMainWindow):
             "mini_clock_theme": self._mini_clock_theme,
             "kanban_min_col_width": self._kanban_min_col_width,
             "kanban_show_quick": self._kanban_show_quick,
+            "kanban_auto_complete_enabled": self._kanban_auto_complete_enabled,
+            "kanban_auto_complete_color": self._kanban_auto_complete_color,
+            "kanban_auto_complete_retention_days": self._kanban_auto_complete_retention,
+            "kanban_recent_completed_enabled": self._kanban_recent_completed_enabled,
+            "kanban_recent_completed_days": self._kanban_recent_completed_days,
         })
