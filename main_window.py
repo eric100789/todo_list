@@ -63,7 +63,7 @@ def save_prefs(prefs: dict):
     with open(PREFS_PATH, "w", encoding="utf-8") as f:
         json.dump(prefs, f, indent=2)
 
-
+# s
 class MainWindow(QMainWindow):
     """Main application window."""
 
