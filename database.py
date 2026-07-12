@@ -61,6 +61,8 @@ def init_db():
         conn.execute("ALTER TABLE tasks ADD COLUMN pos_x INTEGER DEFAULT 0")
     if not _column_exists(conn, "tasks", "pos_y"):
         conn.execute("ALTER TABLE tasks ADD COLUMN pos_y INTEGER DEFAULT 0")
+    if not _column_exists(conn, "tasks", "auto_completed_at"):
+        conn.execute("ALTER TABLE tasks ADD COLUMN auto_completed_at TIMESTAMP")
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS board_categories (
@@ -181,10 +183,40 @@ def complete_task(task_id):
     conn.close()
 
 
+def auto_complete_task(task_id):
+    """Mark a task as auto-completed (record timestamp)."""
+    conn = get_connection()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        "UPDATE tasks SET status = 'completed', completed_at = ?, auto_completed_at = ? WHERE id = ?",
+        (now, now, task_id)
+    )
+    conn.commit()
+    conn.close()
+
+
 def delete_task(task_id):
     """Permanently delete a task."""
     conn = get_connection()
     conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    conn.commit()
+    conn.close()
+
+
+def cleanup_auto_completed(retention_days: int = 3):
+    """Remove auto-completed tasks older than retention_days."""
+    if retention_days is None or retention_days <= 0:
+        return
+    from datetime import timedelta
+
+    conn = get_connection()
+    cutoff = (datetime.now() - timedelta(days=int(retention_days))).strftime("%Y-%m-%d %H:%M:%S")
+    # Instead of deleting historical auto-completed rows, clear their board placement
+    # so they no longer appear on the Kanban board while preserving the record in history.
+    conn.execute(
+        "UPDATE tasks SET category_id = NULL WHERE auto_completed_at IS NOT NULL AND auto_completed_at < ?",
+        (cutoff,)
+    )
     conn.commit()
     conn.close()
 

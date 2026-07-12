@@ -66,6 +66,11 @@ class SettingsPanel(QWidget):
     mini_views_changed = pyqtSignal(list)
     mini_gadgets_changed = pyqtSignal(bool, bool, bool)
     mini_clock_theme_changed = pyqtSignal(str)
+    kanban_auto_complete_changed = pyqtSignal(bool)
+    kanban_auto_complete_color_changed = pyqtSignal(str)
+    kanban_auto_complete_days_changed = pyqtSignal(int)
+    kanban_recent_completed_changed = pyqtSignal(bool)
+    kanban_recent_completed_days_changed = pyqtSignal(int)
 
     MINI_DEFAULT_W = 200
     MINI_DEFAULT_H = 380
@@ -150,6 +155,64 @@ class SettingsPanel(QWidget):
         kanban_width_row.addStretch()
 
         layout.addLayout(kanban_width_row)
+
+        # --- Kanban Auto-Complete ---
+        auto_row = QHBoxLayout()
+        auto_row.setSpacing(10)
+
+        self.kanban_auto_complete_check = QCheckBox(t("kanban_auto_complete_toggle"))
+        self.kanban_auto_complete_check.setFont(QFont("Segoe UI", 12))
+        self.kanban_auto_complete_check.stateChanged.connect(
+            lambda state: self.kanban_auto_complete_changed.emit(bool(state))
+        )
+        auto_row.addWidget(self.kanban_auto_complete_check)
+
+        self.kanban_auto_complete_color = QComboBox()
+        self.kanban_auto_complete_color.addItem(t("auto_complete_color_default"), "#D1D5DB")
+        self.kanban_auto_complete_color.addItem(t("auto_complete_color_light"), "#E5E7EB")
+        self.kanban_auto_complete_color.addItem(t("auto_complete_color_muted"), "#BDBDBD")
+        self.kanban_auto_complete_color.setMinimumWidth(160)
+        self.kanban_auto_complete_color.currentIndexChanged.connect(
+            lambda idx: self.kanban_auto_complete_color_changed.emit(self.kanban_auto_complete_color.itemData(idx))
+        )
+        auto_row.addWidget(self.kanban_auto_complete_color)
+
+        self.kanban_auto_complete_days = QSpinBox()
+        self.kanban_auto_complete_days.setMinimum(1)
+        self.kanban_auto_complete_days.setMaximum(30)
+        self.kanban_auto_complete_days.setValue(3)
+        self.kanban_auto_complete_days.setSuffix(" d")
+        self.kanban_auto_complete_days.valueChanged.connect(
+            lambda v: self.kanban_auto_complete_days_changed.emit(int(v))
+        )
+        auto_row.addWidget(self.kanban_auto_complete_days)
+
+        auto_row.addStretch()
+        layout.addLayout(auto_row)
+
+        # --- Recent Completed ---
+        recent_row = QHBoxLayout()
+        recent_row.setSpacing(10)
+
+        self.kanban_recent_completed_check = QCheckBox(t("recent_completed_toggle"))
+        self.kanban_recent_completed_check.setFont(QFont("Segoe UI", 12))
+        self.kanban_recent_completed_check.stateChanged.connect(
+            lambda state: self.kanban_recent_completed_changed.emit(bool(state))
+        )
+        recent_row.addWidget(self.kanban_recent_completed_check)
+
+        self.kanban_recent_completed_days = QSpinBox()
+        self.kanban_recent_completed_days.setMinimum(1)
+        self.kanban_recent_completed_days.setMaximum(30)
+        self.kanban_recent_completed_days.setValue(3)
+        self.kanban_recent_completed_days.setSuffix(" d")
+        self.kanban_recent_completed_days.valueChanged.connect(
+            lambda v: self.kanban_recent_completed_days_changed.emit(int(v))
+        )
+        recent_row.addWidget(self.kanban_recent_completed_days)
+
+        recent_row.addStretch()
+        layout.addLayout(recent_row)
 
         self._add_separator(layout)
 
@@ -428,6 +491,15 @@ class SettingsPanel(QWidget):
         self.kanban_title_label.setText(t("kanban_settings_title"))
         self.kanban_min_width_label.setText(t("kanban_min_width"))
         self.kanban_width_reset_btn.setText(t("reset_default"))
+        # Auto-complete labels
+        try:
+            self.kanban_auto_complete_check.setText(t("kanban_auto_complete_toggle"))
+        except Exception:
+            pass
+        try:
+            self.kanban_recent_completed_check.setText(t("recent_completed_toggle"))
+        except Exception:
+            pass
         self.mini_views_label.setText(t("mini_views_title"))
         self.mini_view_tasks_check.setText(t("mini_view_tasks"))
         self.mini_view_quick_check.setText(t("mini_view_quick"))
@@ -476,6 +548,32 @@ class SettingsPanel(QWidget):
         self.kanban_min_width_spin.blockSignals(True)
         self.kanban_min_width_spin.setValue(max(180, min(420, int(min_width))))
         self.kanban_min_width_spin.blockSignals(False)
+
+    def set_kanban_auto_complete(self, enabled: bool, color: str = None, days: int = 3):
+        self.kanban_auto_complete_check.blockSignals(True)
+        self.kanban_auto_complete_check.setChecked(bool(enabled))
+        self.kanban_auto_complete_check.blockSignals(False)
+
+        if color is not None:
+            idx = self.kanban_auto_complete_color.findData(color)
+            if idx < 0:
+                idx = 0
+            self.kanban_auto_complete_color.blockSignals(True)
+            self.kanban_auto_complete_color.setCurrentIndex(idx)
+            self.kanban_auto_complete_color.blockSignals(False)
+
+        self.kanban_auto_complete_days.blockSignals(True)
+        self.kanban_auto_complete_days.setValue(int(days))
+        self.kanban_auto_complete_days.blockSignals(False)
+
+    def set_kanban_recent_completed(self, enabled: bool, days: int = 3):
+        self.kanban_recent_completed_check.blockSignals(True)
+        self.kanban_recent_completed_check.setChecked(bool(enabled))
+        self.kanban_recent_completed_check.blockSignals(False)
+
+        self.kanban_recent_completed_days.blockSignals(True)
+        self.kanban_recent_completed_days.setValue(int(days))
+        self.kanban_recent_completed_days.blockSignals(False)
 
     def _reset_kanban_width(self):
         self.kanban_min_width_spin.setValue(self.KANBAN_MIN_COL_DEFAULT)

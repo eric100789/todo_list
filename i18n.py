@@ -90,6 +90,14 @@ STRINGS = {
     # Kanban settings
     "kanban_settings_title": {"en": "Kanban Options", "zh_tw": "看板設定"},
     "kanban_min_width": {"en": "Min column width", "zh_tw": "欄位最小寬度"},
+    "kanban_auto_complete_toggle": {"en": "Enable Auto-complete column", "zh_tw": "啟用自動完成列"},
+    "kanban_auto_complete_column": {"en": "Auto-complete", "zh_tw": "自動完成"},
+    "recent_completed_toggle": {"en": "Show Recent Completed", "zh_tw": "顯示近期完成"},
+    "recent_completed_column": {"en": "Recent Completed", "zh_tw": "近期完成"},
+    "recent_completed_days": {"en": "Days", "zh_tw": "天數"},
+    "auto_complete_color_default": {"en": "Default Gray", "zh_tw": "預設灰色"},
+    "auto_complete_color_light": {"en": "Light Gray", "zh_tw": "淺灰"},
+    "auto_complete_color_muted": {"en": "Muted Gray", "zh_tw": "低飽和灰"},
 
     # Dialog - Detail
     "task_details": {"en": "Task Details", "zh_tw": "任務詳情"},
